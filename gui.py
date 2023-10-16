@@ -24,7 +24,7 @@ RED = "background-color: red; color: white; font-size: 20px; width: 200px; heigh
 GREEN = "background-color: green; color: white; font-size: 20px; width: 200px; height: 30px;"
 
 
-IMAGE_FILE = "controler.png"
+IMAGE_FILE = "controller.png"
 
 
 
