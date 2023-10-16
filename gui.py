@@ -1,8 +1,8 @@
 from PyQt5.QtWidgets import QApplication, QMainWindow, QSplitter, QTextEdit, QGraphicsView, QGraphicsScene ,QPushButton
-from PyQt5.QtCore import QThread, pyqtSignal ,Qt , pyqtSlot
+from PyQt5.QtCore import QThread, pyqtSignal ,Qt , QTimer
 from PyQt5.QtGui import QPixmap, QImage
 
-
+# ???
 import sys
 from cv_bridge import CvBridge
 
@@ -19,8 +19,25 @@ from std_msgs.msg import Bool
 # terminal
 import QTermWidget
 
-RED = "background-color: red; color: white; font-size: 20px; width: 200px; height: 50px;"
-GREEN = "background-color: green; color: white; font-size: 20px; width: 200px; height: 50px;"
+# button
+RED = "background-color: red; color: white; font-size: 20px; width: 200px; height: 30px;"
+GREEN = "background-color: green; color: white; font-size: 20px; width: 200px; height: 30px;"
+
+
+IMAGE_FILE = "controler.png"
+
+
+
+class Topics():
+    def __init__(self,images:set,emergency:str) -> None:
+        self.images = sorted(list(images))
+        self.emergency = emergency
+
+TOPICS = Topics(set(["/image_raw","/image_raw_2"]),'sr_driver_topic')
+
+# for window
+SIZE = 600
+SIZE_DIVIDE = 2
 
 
 class Terminal(QTermWidget.QTermWidget):
@@ -46,8 +63,11 @@ class RosThread(QThread):
         QThread.__init__(self)
         rclpy.init()
         self.node = rclpy.create_node('my_node')
-        self.publisher = self.node.create_publisher(Bool, 'topic', 10)
-        self.subscription = self.node.create_subscription(Image, '/image_raw', self.listener_callback, 10)
+        self.publisher = self.node.create_publisher(Bool,TOPICS.emergency, 10)
+        
+        self.subscription_topic = 0 
+        self.subscription = self.node.create_subscription(Image, TOPICS.images[self.subscription_topic], self.listener_callback, 10)
+
         self.bridge = CvBridge()
 
     def listener_callback(self, msg):
@@ -63,18 +83,28 @@ class RosThread(QThread):
         msg.data = mode
         self.publisher.publish(msg)
 
+    def change_image_topic(self):
+
+        self.subscription_topic = (self.subscription_topic+1)%len(TOPICS.images)
+        # 既存のサブスクリプションを解除
+        self.node.destroy_subscription(self.subscription)
+        
+        # 新しいトピックに対して新たなサブスクリプションを作成
+        self.subscription = self.node.create_subscription(Image,TOPICS.images[self.subscription_topic], self.listener_callback, 10)
+
+
 
     def run(self):
         rclpy.spin(self.node)
 
 class Window(QMainWindow):
 
-    click_count = 0
-    # node_update = True
+    click_count = 1
+
     def __init__(self):
         super().__init__()
 
-        self.setGeometry(100, 100, 700, 700)
+        self.setGeometry(100, 100, SIZE, SIZE)
         self.setWindowTitle("Graphical D-Robo Interface")
 
         self.thread = RosThread()
@@ -94,15 +124,9 @@ class Window(QMainWindow):
                 "upper_left"  : QGraphicsView(),
 
             "lower" : QSplitter(),
-                "lower_right" : QTextEdit(),
-                "lower_left"  : Terminal() # Use QGraphicsView for displaying image
+                "lower_right" : QGraphicsView(),
+                "lower_left"  : Terminal()
         }
-
-        # Create a button and set its style
-        self.windows["upper_right_lower"].setStyleSheet("background-color: red; color: white; font-size: 20px; width: 200px; height: 50px;")
-        self.windows["upper_right_lower"].clicked.connect(self.on_click)
-
-        self.on_click()
 
         self.windows["upper"].addWidget(self.windows["upper_left"])
         self.windows["upper"].addWidget(self.windows["upper_right"])
@@ -122,45 +146,70 @@ class Window(QMainWindow):
 
         self.setCentralWidget(vsplitter)
 
-        self.windows["upper_right_upper"].focusInEvent = self.focusInEvent
-        self.windows["upper_right_upper"].focusOutEvent = self.focusOutEvent
+
+
+        self.button_setting()
+        self.image_setting()
+        self.set_window_size()
+
+
+
+
+    def image_setting(self):
 
         self.scene = QGraphicsScene()
         self.windows["upper_left"].setScene(self.scene)
+
+        self.scene_1= QGraphicsScene()
+        self.windows["lower_right"].setScene(self.scene_1)
+
+        self.windows["upper_left"].mousePressEvent = self.change_image_mode
+
+    def button_setting(self):
+        self.windows["upper_right_lower"].setStyleSheet(GREEN)
+        self.windows["upper_right_lower"].clicked.connect(self.on_click)
+
+    def set_window_size(self):
+        self.windows["upper"].resize(SIZE, SIZE)
+        self.windows["lower"].resize(SIZE, SIZE)
+
+        self.windows["lower_right"].resize(SIZE//SIZE_DIVIDE, SIZE//SIZE_DIVIDE)
+        self.windows["lower_left"].resize(SIZE//SIZE_DIVIDE, SIZE//SIZE_DIVIDE)
+
+
+        self.windows["upper_right"].resize(SIZE//SIZE_DIVIDE, SIZE//SIZE_DIVIDE)
+        self.windows["upper_left"].resize(SIZE//SIZE_DIVIDE, SIZE//SIZE_DIVIDE)
+
+
+
+
+    def resize_image(self):
+        pixmap = QPixmap(IMAGE_FILE)
+        self.scene_1.addPixmap(pixmap)
+        self.windows["lower_right"].fitInView(self.scene_1.sceneRect())
+
 
     def thread_return(self,data):
         self.image_management(data["pixmap"])
         self.node_list_management(data["node_list"])
 
 
+    def change_image_mode(self,event):
+        self.thread.change_image_topic()
+
+
     def image_management(self, pixmap):
         self.scene.clear()
         self.scene.addPixmap(pixmap)
         self.windows["upper_left"].fitInView(self.scene.sceneRect())
-    
+
+
     def node_list_management(self, node_list):
-        # if not self.node_update:
-        #     return
         node_list = "\n".join(node_list)
         self.windows["upper_right_upper"].setText(node_list)
 
-    
 
-    # @pyqtSlot()
-    # def focusInEvent(self, event):
-    #     self.node_update = False
-    #     return super(QTextEdit, self.windows["upper_right_upper"]).focusInEvent(event)
-
-    # @pyqtSlot()
-    # def focusOutEvent(self, event):
-    #     self.node_update = True
-    #     return super(QTextEdit, self.windows["upper_right_upper"]).focusOutEvent(event)
-        
-        
-        
-    
     def on_click(self):
-        
 
         self.click_count += 1
         if self.click_count % 2 == 0:
@@ -175,10 +224,17 @@ class Window(QMainWindow):
             self.thread.send_command(False)
 
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":    
 
     app = QApplication(sys.argv)
     window = Window()
+
+
+    timer = QTimer()
+    timer.timeout.connect(window.resize_image)
+    timer.start(1000) # ms
+
+
     window.show()
     sys.exit(app.exec_())
